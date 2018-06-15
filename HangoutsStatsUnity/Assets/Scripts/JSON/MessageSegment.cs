@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-public class Events
+public class MessageSegment
 {
-	
+	public string text;
 }

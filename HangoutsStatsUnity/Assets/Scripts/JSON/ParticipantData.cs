@@ -5,4 +5,5 @@ using UnityEngine;
 public class ParticipantData
 {
 	public string fallback_name;
+	public ParticipantDataId id;
 }

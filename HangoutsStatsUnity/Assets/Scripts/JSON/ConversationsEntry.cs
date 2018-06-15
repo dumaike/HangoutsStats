@@ -5,5 +5,5 @@ using UnityEngine;
 public class ConversationsEntry
 {
 	public Conversation conversation;
-	public List<Event> events;
+	public List<ConversationEvent> events;
 }
