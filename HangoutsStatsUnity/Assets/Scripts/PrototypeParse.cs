@@ -4,6 +4,8 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Experimental.UIElements;
+using UnityEngine.UI;
 
 public class PrototypeParse : MonoBehaviour
 {
@@ -27,17 +29,25 @@ public class PrototypeParse : MonoBehaviour
 
 	public TextAsset hangoutsText;
 
+	public long horizontalPeriodDays = 7;
+
 	//The user we're parsing text history with
 	public string userNameToExport;
 
 	public GraphChartBase graph;
+
+	public Text titleText;
 	
 	private DateTime epoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
-	private long oneWeek = (long)1000000 * 60 * 60 * 24 * 7;	
+	private long horizontalPeriodTicks;
 
 	public void Start()
 	{
+		string typeAsText = graphType.ToString().ToLower();
+		typeAsText = typeAsText.Substring(0, 1).ToUpper() + typeAsText.Substring(1);
+        titleText.text = "Number of " + typeAsText + " Sent";
+
 		if (runMode == MODE.GRAPH)
 		{
 			GraphDataPackage graphData = GetGraphForConversation();
@@ -97,6 +107,8 @@ public class PrototypeParse : MonoBehaviour
 
 	private GraphDataPackage GetGraphForConversation()
 	{
+		horizontalPeriodTicks = (long)1000000 * 60 * 60 * 24 * horizontalPeriodDays;
+
 		ConversationsEntry entry = JsonConvert.DeserializeObject<ConversationsEntry>(hangoutsText.text);
 
 		string user1 = entry.conversation.conversation.participant_data[0].id.chat_id;
@@ -138,16 +150,16 @@ public class PrototypeParse : MonoBehaviour
 			}
 
 			//If the month rolled over, reset it
-			if (message.timestamp - startOfTimePeriod > oneWeek)
+			if (message.timestamp - startOfTimePeriod > horizontalPeriodTicks)
 			{
 				graphData.entries.Add(graphEntry);
 				graphEntry = new GraphDataEntry();				
 				
 				graphEntry.timestamp = message.timestamp / 1000000;
 
-				while (startOfTimePeriod + oneWeek < message.timestamp)
+				while (startOfTimePeriod + horizontalPeriodTicks < message.timestamp)
 				{
-					startOfTimePeriod += oneWeek;
+					startOfTimePeriod += horizontalPeriodTicks;
 				}
 			}
 
