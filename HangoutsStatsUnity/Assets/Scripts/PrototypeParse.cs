@@ -3,6 +3,7 @@ using Newtonsoft.Json;
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using UnityEngine.Experimental.UIElements;
 using UnityEngine.UI;
@@ -20,7 +21,8 @@ public class PrototypeParse : MonoBehaviour
 		MESSAGES,
 		CHARACTERS,
 		MEDIA,
-		QUESTIONS
+		QUESTIONS,
+		WORD_FREQUENCY
 	}
 
 	public MODE runMode = MODE.GRAPH;
@@ -37,21 +39,28 @@ public class PrototypeParse : MonoBehaviour
 	public GraphChartBase graph;
 
 	public Text titleText;
-	
+
+	public Text user1WordFrequency;
+
+	public Text user2WordFrequency;
+
 	private DateTime epoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
 	private long horizontalPeriodTicks;
 
 	public void Start()
 	{
-		string typeAsText = graphType.ToString().ToLower();
-		typeAsText = typeAsText.Substring(0, 1).ToUpper() + typeAsText.Substring(1);
-        titleText.text = "Number of " + typeAsText + " Sent";
-
 		if (runMode == MODE.GRAPH)
 		{
-			GraphDataPackage graphData = GetGraphForConversation();
-			DrawGraph(graphData);
+			if (graphType != GRAPH_TYPE.WORD_FREQUENCY)
+			{
+				GraphDataPackage graphData = GetGraphForConversation();
+				DrawGraph(graphData);
+			}
+			else
+			{
+				CreateWordFrequencyChart();
+			}
 		}
 		else
 		{
@@ -245,6 +254,156 @@ public class PrototypeParse : MonoBehaviour
 		return graphData;
 	}
 
+
+	private void CreateWordFrequencyChart()
+	{
+		graph.gameObject.SetActive(false);
+		titleText.text = "Word Frequency";
+
+		ConversationsEntry entry = JsonConvert.DeserializeObject<ConversationsEntry>(hangoutsText.text);
+
+		string user1Id = entry.conversation.conversation.participant_data[0].id.chat_id;
+		string user2Id = entry.conversation.conversation.participant_data[1].id.chat_id;
+
+		string user1Name = entry.conversation.conversation.participant_data[0].fallback_name;
+		string user2Name = entry.conversation.conversation.participant_data[1].fallback_name;
+
+		Dictionary<string, int> user1WordCount = new Dictionary<string, int>();
+		Dictionary<string, int> user2WordCount = new Dictionary<string, int>();
+
+		if (user2Id == null || user1Id == null)
+		{
+			Debug.LogError("No user named \"" + userNameToExport + "\" found");
+			return;
+		}
+
+		foreach (ConversationEvent message in entry.events)
+		{
+			//If the message was from them
+			if (message.sender_id.chat_id == user2Id)
+			{
+				IncrementWordCountInDictionary(message, user2WordCount);
+			}
+			else if (message.sender_id.chat_id == user1Id)
+			{
+				IncrementWordCountInDictionary(message, user1WordCount);
+			}
+        }
+		
+		SortAndSaveWordFrequency(user1WordCount, user2WordCount, user1Name, user2Name);
+	}
+
+	private void SortAndSaveWordFrequency(Dictionary<string, int> dict1, Dictionary<string, int> dict2, string userName1, string userName2)
+	{
+		string wordList = userName1 + NumSpaces(5) + userName2 + "\n";
+		int spaceBuffer = userName1.Length + 5;
+
+		dict1.Remove("");
+		dict2.Remove("");
+
+		List<KeyValuePair<string, int>> sortedWords1 = dict1.ToList();
+
+		sortedWords1.Sort(
+			delegate (KeyValuePair<string, int> pair1,
+			KeyValuePair<string, int> pair2)
+			{
+				return pair2.Value.CompareTo(pair1.Value);
+			}
+		);
+
+		List<KeyValuePair<string, int>> sortedWords2 = dict2.ToList();
+
+		sortedWords2.Sort(
+			delegate (KeyValuePair<string, int> pair1,
+			KeyValuePair<string, int> pair2)
+			{
+				return pair2.Value.CompareTo(pair1.Value);
+			}
+		);
+
+		int maxVocab = Math.Max(sortedWords1.Count, sortedWords2.Count);
+		for (int i = 0; i < maxVocab; i++)
+		{
+			//Don't count words that have appeared less than 5 times
+			if (sortedWords1[i].Value < 3)
+			{
+				break;
+			}
+
+			string u1Word = sortedWords1.Count <= i ? "NO_WORD" : FirstCharToUpper(sortedWords1[i].Key) + " (" + sortedWords1[i].Value.ToString("N0") + ")";
+			string u2Word = sortedWords2.Count <= i ? "NO_WORD" : FirstCharToUpper(sortedWords2[i].Key) + " (" + sortedWords2[i].Value.ToString("N0") + ")";
+
+			int spaceBufferThisLine = spaceBuffer - u1Word.Length;
+
+			wordList += (i + 1) + ". " + u1Word + NumSpaces(spaceBufferThisLine) + u2Word + "\n";
+		}
+
+		string flatUserId = userName1.Replace(" ", "");
+		System.IO.File.WriteAllText(Application.dataPath + "/HangoutsHistory/" +  flatUserId + "Words.txt", wordList);
+	}
+
+	private string FirstCharToUpper(string input)
+	{
+		return input.First().ToString().ToUpper() + input.Substring(1);
+	}
+
+	private string NumSpaces(int num)
+	{
+		string returnString = "";
+
+		for (int i = 0; i < num; i++)
+		{
+			returnString += " ";
+		}
+
+		return returnString;
+	}
+
+	private void IncrementWordCountInDictionary(ConversationEvent messageEvent, Dictionary<string, int> dict)
+	{
+		//For non chat messages like call notifications
+		if (messageEvent.chat_message == null)
+		{
+			return;
+		}
+
+		if (messageEvent.chat_message.message_content == null || 
+			messageEvent.chat_message.message_content.segment == null)
+		{
+			return;
+		}
+
+		foreach (MessageSegment messageText in messageEvent.chat_message.message_content.segment)
+		{
+			if (messageText == null || messageText.text == null)
+			{
+				continue;
+			}
+
+			string[] messageSplit = messageText.text.Split(' ');
+			foreach (string word in messageSplit)
+			{
+				string lcWord = word.ToLower();
+				lcWord = lcWord.Replace("\"", "");
+				lcWord = lcWord.Replace("?", "");
+				lcWord = lcWord.Replace(".", "");
+				lcWord = lcWord.Replace("!", "");
+				lcWord = lcWord.Replace("-", "");
+				lcWord = lcWord.Replace("`", "");
+				lcWord = lcWord.Replace("(", "");
+				lcWord = lcWord.Replace("}", "");
+				lcWord = lcWord.Replace(",", "");
+				lcWord = lcWord.Replace(":", "");
+
+				if (!dict.ContainsKey(lcWord))
+				{
+					dict.Add(lcWord, 0);
+				}
+				dict[lcWord]++;
+			}
+		}
+	}
+
 	private void DrawGraph(GraphDataPackage graphData)
 	{
 		if (graph == null)
@@ -252,6 +411,12 @@ public class PrototypeParse : MonoBehaviour
 			Debug.LogError("There is no graph");
 			return;
 		}
+
+		graph.gameObject.SetActive(true);
+
+		string typeAsText = graphType.ToString().ToLower();
+		typeAsText = typeAsText.Substring(0, 1).ToUpper() + typeAsText.Substring(1);
+		titleText.text = "Number of " + typeAsText + " Sent";
 
 		graph.DataSource.RenameCategory("Player 1", graphData.user1Name);
 		graph.DataSource.RenameCategory("Player 2", graphData.user2Name);
