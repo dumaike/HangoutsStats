@@ -22,7 +22,8 @@ public class PrototypeParse : MonoBehaviour
 		CHARACTERS,
 		MEDIA,
 		QUESTIONS,
-		WORD_FREQUENCY
+		WORD_FREQUENCY_ABSOLUTE,
+        WORD_FREQUENCY_RELATIVE
 	}
 
 	public MODE runMode = MODE.GRAPH;
@@ -52,14 +53,18 @@ public class PrototypeParse : MonoBehaviour
 	{
 		if (runMode == MODE.GRAPH)
 		{
-			if (graphType != GRAPH_TYPE.WORD_FREQUENCY)
+			if (graphType == GRAPH_TYPE.WORD_FREQUENCY_ABSOLUTE)
 			{
-				GraphDataPackage graphData = GetGraphForConversation();
-				DrawGraph(graphData);
+				CreateAbsoluteWordFreuqencyList();
+			}
+			else if (graphType == GRAPH_TYPE.WORD_FREQUENCY_RELATIVE)
+			{
+				CreateRelativeWordFrequencyList();
 			}
 			else
 			{
-				CreateWordFrequencyChart();
+				GraphDataPackage graphData = GetGraphForConversation();
+				DrawGraph(graphData);
 			}
 		}
 		else
@@ -254,12 +259,131 @@ public class PrototypeParse : MonoBehaviour
 		return graphData;
 	}
 
-
-	private void CreateWordFrequencyChart()
+	private void CreateRelativeWordFrequencyList()
 	{
-		graph.gameObject.SetActive(false);
-		titleText.text = "Word Frequency";
+		ConversationsEntry convo = JsonConvert.DeserializeObject<ConversationsEntry>(hangoutsText.text);
 
+		string user1Id = convo.conversation.conversation.participant_data[0].id.chat_id;
+		string user2Id = convo.conversation.conversation.participant_data[1].id.chat_id;
+
+		Dictionary<string, int> user1WordCount = CreateWordFrequencyDictionary(convo, user1Id);
+		List<KeyValuePair<string, int>> sortedWords1 = SortWordFrequencyList(user1WordCount);
+		Dictionary<string, int> user2WordCount = CreateWordFrequencyDictionary(convo, user2Id);
+		List<KeyValuePair<string, int>> sortedWords2 = SortWordFrequencyList(user2WordCount);
+
+		List<WordFrequencyPackage> user1UsesMore = new List<WordFrequencyPackage>();
+		List<WordFrequencyPackage> user2UsesMore = new List<WordFrequencyPackage>();
+		HashSet<string> completeWords = new HashSet<string>();
+
+		int topCutoffInCompare = 2000;
+		CalculateRelativeFrequency(sortedWords1, sortedWords2, user2WordCount, user1UsesMore, user2UsesMore, completeWords, topCutoffInCompare);
+		CalculateRelativeFrequency(sortedWords2, sortedWords1, user1WordCount, user2UsesMore, user1UsesMore, completeWords, topCutoffInCompare);
+
+		user1UsesMore.Sort((x, y) => {
+			return Math.Abs(y.relativeFrequency).CompareTo(Math.Abs(x.relativeFrequency));
+		});
+		user2UsesMore.Sort((x, y) => {
+			return Math.Abs(y.relativeFrequency).CompareTo(Math.Abs(x.relativeFrequency));
+		});
+
+		string user1Name = convo.conversation.conversation.participant_data[0].fallback_name;
+		string user2Name = convo.conversation.conversation.participant_data[1].fallback_name;
+
+		string textOutput = user1Name + NumSpaces(15) + user2Name + "\n";
+		int spaceBuffer = user1Name.Length + 15;
+
+		int maxWords = Math.Max(user1UsesMore.Count, user2UsesMore.Count);
+		for (int i = 0; i < maxWords; i++)
+		{
+			string textLine = "";
+			if (user1UsesMore.Count > i)
+			{
+				textLine += "\"" + FirstCharToUpper(user1UsesMore[i].word) + "\" ";
+				string user2Frequency =
+					(user1UsesMore[i].user2Frequency == int.MaxValue) ? "INF" : user1UsesMore[i].user2Frequency.ToString("N0");
+
+				textLine += user1UsesMore[i].user1Frequency.ToString("N0") + "->" + user2Frequency;
+            }
+
+			textLine += NumSpaces(spaceBuffer - textLine.Length);
+
+			if (user2UsesMore.Count > i)
+			{
+				textLine += "\"" + FirstCharToUpper(user2UsesMore[i].word) + "\" ";
+				int smallFrequency = Math.Min(user2UsesMore[i].user2Frequency, user2UsesMore[i].user1Frequency);
+				int bigFrequency = Math.Max(user2UsesMore[i].user2Frequency, user2UsesMore[i].user1Frequency);
+
+				string smallFreqText = smallFrequency.ToString("N0");
+				string bigFreqText = bigFrequency == int.MaxValue ? "INF" : bigFrequency.ToString("N0");
+
+				textLine += smallFreqText + "->" + bigFreqText;
+			}
+
+			textOutput += textLine + "\n";
+		}
+
+		string myName = user2Name.Contains("Dwyer") ? user1Name : user2Name;
+		string theirUserName = myName.Replace(" ", "");
+		System.IO.File.WriteAllText(Application.dataPath + "/HangoutsHistory/" + theirUserName + "RelativeWords.txt", textOutput);
+	}
+
+	private void CalculateRelativeFrequency(
+		List<KeyValuePair<string, int>> sortedWords1, 
+		List<KeyValuePair<string, int>> sortedWords2,
+		Dictionary<string, int> user2WordCount,
+		List<WordFrequencyPackage> user1UsesMore,
+		List<WordFrequencyPackage> user2UsesMore,
+		HashSet<string> completeWords,
+		int topCutoffInCompare)
+    {
+		int topToCount = 200;
+		for (int i = 0; i < topToCount; ++i)
+		{
+			WordFrequencyPackage result = new WordFrequencyPackage();
+			KeyValuePair<string, int> user1Entry = sortedWords1[i];
+
+			//Don't check words we've already compared
+			if (completeWords.Contains(user1Entry.Key))
+			{
+				continue;
+			}
+
+			int positionForUser2 = int.MaxValue - 1;
+			if (user2WordCount.ContainsKey(user1Entry.Key))
+			{
+				for (int j = 0; j < sortedWords2.Count; ++j)
+				{
+					if (sortedWords2[j].Key == user1Entry.Key)
+					{
+						positionForUser2 = j;
+						break;
+					}
+				}
+			}
+			else
+			{
+				positionForUser2 = topCutoffInCompare;
+			}
+			
+			result.word = user1Entry.Key;
+			result.relativeFrequency = i - positionForUser2;
+			result.user1Frequency = i + 1;
+			result.user2Frequency = positionForUser2 + 1;
+
+			completeWords.Add(user1Entry.Key);
+			if (result.relativeFrequency < 0)
+			{
+				user1UsesMore.Add(result);
+			}
+			else if (result.relativeFrequency > 0)
+			{
+				user2UsesMore.Add(result);
+			}
+		}
+	}
+
+	private void CreateAbsoluteWordFreuqencyList()
+	{
 		ConversationsEntry entry = JsonConvert.DeserializeObject<ConversationsEntry>(hangoutsText.text);
 
 		string user1Id = entry.conversation.conversation.participant_data[0].id.chat_id;
@@ -268,78 +392,68 @@ public class PrototypeParse : MonoBehaviour
 		string user1Name = entry.conversation.conversation.participant_data[0].fallback_name;
 		string user2Name = entry.conversation.conversation.participant_data[1].fallback_name;
 
-		Dictionary<string, int> user1WordCount = new Dictionary<string, int>();
-		Dictionary<string, int> user2WordCount = new Dictionary<string, int>();
+		Dictionary<string, int> user1WordCount = CreateWordFrequencyDictionary(entry, user1Id);
+		Dictionary<string, int> user2WordCount = CreateWordFrequencyDictionary(entry, user2Id);
 
-		if (user2Id == null || user1Id == null)
-		{
-			Debug.LogError("No user named \"" + userNameToExport + "\" found");
-			return;
-		}
+		string wordList = user1Name + NumSpaces(10) + user2Name + "\n";
+		int spaceBuffer = user1Name.Length + 10;
 
-		foreach (ConversationEvent message in entry.events)
-		{
-			//If the message was from them
-			if (message.sender_id.chat_id == user2Id)
-			{
-				IncrementWordCountInDictionary(message, user2WordCount);
-			}
-			else if (message.sender_id.chat_id == user1Id)
-			{
-				IncrementWordCountInDictionary(message, user1WordCount);
-			}
-        }
-		
-		SortAndSaveWordFrequency(user1WordCount, user2WordCount, user1Name, user2Name);
-	}
-
-	private void SortAndSaveWordFrequency(Dictionary<string, int> dict1, Dictionary<string, int> dict2, string userName1, string userName2)
-	{
-		string wordList = userName1 + NumSpaces(10) + userName2 + "\n";
-		int spaceBuffer = userName1.Length + 10;
-
-		dict1.Remove("");
-		dict2.Remove("");
-
-		List<KeyValuePair<string, int>> sortedWords1 = dict1.ToList();
-
-		sortedWords1.Sort(
-			delegate (KeyValuePair<string, int> pair1,
-			KeyValuePair<string, int> pair2)
-			{
-				return pair2.Value.CompareTo(pair1.Value);
-			}
-		);
-
-		List<KeyValuePair<string, int>> sortedWords2 = dict2.ToList();
-
-		sortedWords2.Sort(
-			delegate (KeyValuePair<string, int> pair1,
-			KeyValuePair<string, int> pair2)
-			{
-				return pair2.Value.CompareTo(pair1.Value);
-			}
-		);
+		List<KeyValuePair<string, int>> sortedWords1 = SortWordFrequencyList(user1WordCount);
+		List<KeyValuePair<string, int>> sortedWords2 = SortWordFrequencyList(user2WordCount);
 
 		int maxVocab = Math.Max(sortedWords1.Count, sortedWords2.Count);
 		for (int i = 0; i < maxVocab; i++)
 		{
-			//Don't count words that have appeared less than 5 times
-			if (sortedWords1[i].Value < 3)
+			//Don't count words that have appeared less than 2 times
+			if (sortedWords1[i].Value < 2 && sortedWords2[i].Value < 2)
 			{
 				break;
 			}
 
-			string u1Word = sortedWords1.Count <= i ? "NO_WORD" : FirstCharToUpper(sortedWords1[i].Key) + " (" + sortedWords1[i].Value.ToString("N0") + ")";
-			string u2Word = sortedWords2.Count <= i ? "NO_WORD" : FirstCharToUpper(sortedWords2[i].Key) + " (" + sortedWords2[i].Value.ToString("N0") + ")";
+			string u1Word = sortedWords1[i].Value < 2 ? "----" : FirstCharToUpper(sortedWords1[i].Key) + " (" + sortedWords1[i].Value.ToString("N0") + ")";
+			string u2Word = sortedWords2[i].Value < 2 ? "----" : FirstCharToUpper(sortedWords2[i].Key) + " (" + sortedWords2[i].Value.ToString("N0") + ")";
 
-			int spaceBufferThisLine = spaceBuffer - u1Word.Length - NumDigits(i+1) + 2;
+			int spaceBufferThisLine = spaceBuffer - u1Word.Length - NumDigits(i + 1) + 2;
 
 			wordList += (i + 1) + ". " + u1Word + NumSpaces(spaceBufferThisLine) + u2Word + "\n";
 		}
 
-		string flatUserId = userName1.Replace(" ", "");
-		System.IO.File.WriteAllText(Application.dataPath + "/HangoutsHistory/" +  flatUserId + "Words.txt", wordList);
+		string myName = user2Name.Contains("Dwyer") ? user1Name : user2Name;
+		string theirUserName = myName.Replace(" ", "");
+		System.IO.File.WriteAllText(Application.dataPath + "/HangoutsHistory/" + theirUserName + "Words.txt", wordList);
+	}
+
+	private Dictionary<string, int> CreateWordFrequencyDictionary(ConversationsEntry convo, string userId)
+	{
+		Dictionary<string, int> user1WordCount = new Dictionary<string, int>();
+
+		foreach (ConversationEvent message in convo.events)
+		{
+			//If the message was from them
+			if (message.sender_id.chat_id == userId)
+			{
+				IncrementWordCountInDictionary(message, user1WordCount);
+			}
+		}
+
+		return user1WordCount;
+	}
+
+	private List<KeyValuePair<string, int>> SortWordFrequencyList(Dictionary<string, int> dict)
+	{
+		dict.Remove("");
+
+		List<KeyValuePair<string, int>> sortedList = dict.ToList();
+
+		sortedList.Sort(
+			delegate (KeyValuePair<string, int> pair1,
+			KeyValuePair<string, int> pair2)
+			{
+				return Math.Abs(pair2.Value).CompareTo(Math.Abs(pair1.Value));
+			}
+		);
+
+		return sortedList;
 	}
 
 	private string FirstCharToUpper(string input)
@@ -396,11 +510,11 @@ public class PrototypeParse : MonoBehaviour
 				lcWord = lcWord.Replace("-", "");
 				lcWord = lcWord.Replace("`", "");
 				lcWord = lcWord.Replace("(", "");
-				lcWord = lcWord.Replace("}", "");
+				lcWord = lcWord.Replace(")", "");
 				lcWord = lcWord.Replace(",", "");
 				lcWord = lcWord.Replace(":", "");
 				lcWord = lcWord.Replace("\n", "");
-				lcWord.Trim();
+				lcWord = lcWord.Trim();
 
 				if (!dict.ContainsKey(lcWord))
 				{
