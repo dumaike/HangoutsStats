@@ -295,8 +295,8 @@ public class PrototypeParse : MonoBehaviour
 
 	private void SortAndSaveWordFrequency(Dictionary<string, int> dict1, Dictionary<string, int> dict2, string userName1, string userName2)
 	{
-		string wordList = userName1 + NumSpaces(5) + userName2 + "\n";
-		int spaceBuffer = userName1.Length + 5;
+		string wordList = userName1 + NumSpaces(10) + userName2 + "\n";
+		int spaceBuffer = userName1.Length + 10;
 
 		dict1.Remove("");
 		dict2.Remove("");
@@ -333,7 +333,7 @@ public class PrototypeParse : MonoBehaviour
 			string u1Word = sortedWords1.Count <= i ? "NO_WORD" : FirstCharToUpper(sortedWords1[i].Key) + " (" + sortedWords1[i].Value.ToString("N0") + ")";
 			string u2Word = sortedWords2.Count <= i ? "NO_WORD" : FirstCharToUpper(sortedWords2[i].Key) + " (" + sortedWords2[i].Value.ToString("N0") + ")";
 
-			int spaceBufferThisLine = spaceBuffer - u1Word.Length;
+			int spaceBufferThisLine = spaceBuffer - u1Word.Length - NumDigits(i+1) + 2;
 
 			wordList += (i + 1) + ". " + u1Word + NumSpaces(spaceBufferThisLine) + u2Word + "\n";
 		}
@@ -344,6 +344,11 @@ public class PrototypeParse : MonoBehaviour
 
 	private string FirstCharToUpper(string input)
 	{
+		if (input == null || input.Length == 0)
+		{
+			return input;
+		}
+
 		return input.First().ToString().ToUpper() + input.Substring(1);
 	}
 
@@ -394,6 +399,8 @@ public class PrototypeParse : MonoBehaviour
 				lcWord = lcWord.Replace("}", "");
 				lcWord = lcWord.Replace(",", "");
 				lcWord = lcWord.Replace(":", "");
+				lcWord = lcWord.Replace("\n", "");
+				lcWord.Trim();
 
 				if (!dict.ContainsKey(lcWord))
 				{
@@ -436,6 +443,11 @@ public class PrototypeParse : MonoBehaviour
 	private DateTime TimestampToDateTime(long timestamp)
 	{
 		return epoch.AddSeconds(timestamp / 1000000);
+	}
+
+	private int NumDigits(int input)
+	{
+		return (int)Math.Floor(Math.Log10(input) + 1);
 	}
 
 	private bool IsQuestion(string input)
